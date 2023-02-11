@@ -1,0 +1,31 @@
+buffer:
+  capacity: 200000
+model:
+  state_dim: 30
+  rnn_hidden_dim: 200
+  learning_rate:
+    dynamics: 6e-4
+    value: 8e-5
+    action: 8e-5
+  epsilon: 1e-4
+  seed_episodes: 1  # num of episodes to be explored in the first random action
+  all_episodes: 5 # num of episodes in the entire learning
+  test_interval: 1  # How often do you perform tests without exploration noise
+  model_save_interval: 1  # How often do you save weights
+  collect_interval: 1  # How often do you update weights per episode
+
+agent:
+  action_noise_var: 0.3  # Search noise intensity
+  gamma: 0.9  # Discount ratio
+  lambda_: 0.95  # parameter of λ-return. If λ is close to 1, agent focus on actual episode results.
+
+training:
+  batch_size: 64
+  chunk_length: 50  # Length of sequence used in one update
+  imagination_horizon: 15  # How many steps ahead to generate imaginated trajectory for Actor-Critic update
+  clip_grad_norm: 100  # gradient clipping
+  free_nats: 3  # If kl loss(between prior and posterior) is less than or equal to this value, it's neglected.
+
+
+
+
