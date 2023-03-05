@@ -1,4 +1,5 @@
 import random
+import math
 import numpy as np
 import copy
 import ast
@@ -17,6 +18,7 @@ class QLearningAgent:
             gamma=.99,
             actions=None,
             observation=None):
+
         self.alpha = alpha
         self.env = env
         self.gamma = gamma
@@ -28,6 +30,9 @@ class QLearningAgent:
         self.previous_state = None
         self.previous_action = None
         self.q_values = self._init_q_values()
+        self.q_table = np.zeros((self.env.size ** 2, len(self.actions)))
+        self.state_values = None
+        assert env.is_task_setup, "Please specify task by calling env.set_task()!"
 
     def _init_q_values(self):
         """
@@ -51,8 +56,7 @@ class QLearningAgent:
             action = np.random.randint(0, len(self.q_values[self.state]))
         else:   # greedy 行動
             action_list = [i for i, x in enumerate(self.q_values[self.state]) if x == max(self.q_values[self.state])] # 最大値が複数ある時のため
-            action = random.randint(0,len(action_list)-1)
-        print(self.q_values)
+            action = random.choice(action_list)
 
         self.previous_action = action
         return action
@@ -71,8 +75,6 @@ class QLearningAgent:
         if reward is not None:
             self.reward_history.append(reward)
             self.learn(reward)
-        if reward != 0:
-            print(reward)
 
     def learn(self, reward):
         """
@@ -81,7 +83,7 @@ class QLearningAgent:
         q = self.q_values[self.previous_state][self.previous_action]  # Q(s, a)
         max_q = max(self.q_values[self.state])  # max Q(s')
         self.q_values[self.previous_state][self.previous_action] = q + \
-            (self.alpha * (reward + (self.gamma * max_q) - q))
+            self.alpha * (reward + (self.gamma * max_q) - q)
 
     def dict_to_table(self, q_dict: dict) -> np.ndarray:
         """Convert the format of q values to 2d-array of state-values.
@@ -89,13 +91,12 @@ class QLearningAgent:
             q_dict: q-values(dict format)
 
         Returns:
+            q_values:
             state_values: state_value-table(table format)
         """
 
-        q_values = np.zeros((self.env.size ** 2, len(self.actions)))
         for key, value in q_dict.items():
-            idx = ast.literal_eval(list(key)[1])
-            q_values[idx] = value
-
-        return q_values
+            idx = ast.literal_eval(key)[0]
+            self.q_table[idx] = value
+        self.state_values = np.reshape(np.sum(self.q_table, axis=1), (int(math.sqrt(self.q_table.shape[0])), -1))
 
