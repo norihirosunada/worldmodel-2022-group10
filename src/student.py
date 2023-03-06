@@ -17,7 +17,8 @@ class QLearningAgent:
             epsilon=.1,
             gamma=.99,
             actions=None,
-            observation=None):
+            observation=None,
+    ):
 
         self.alpha = alpha
         self.env = env
@@ -32,6 +33,7 @@ class QLearningAgent:
         self.q_values = self._init_q_values()
         self.q_table = np.zeros((self.env.size ** 2, len(self.actions)))
         self.state_values = None
+
         assert env.is_task_setup, "Please specify task by calling env.set_task()!"
 
     def _init_q_values(self):
@@ -41,6 +43,16 @@ class QLearningAgent:
         q_values = {}
         q_values[self.state] = np.repeat(0.0, len(self.actions))
         return q_values
+
+    def transfer_q_values(self, state):
+        """Initialize Q-table by state.
+        Args:
+            state: (env.size * env.size, )
+        Returns:
+        """
+        for i in range(0, len(state)):
+            key = str([i])
+            self.q_values[key] = state[i]
 
     def init_state(self):
         """
@@ -61,7 +73,7 @@ class QLearningAgent:
         self.previous_action = action
         return action
 
-    def observe(self, next_state, reward=None):
+    def observe(self, next_state, reward=None, training=True):
         """
             次の状態と報酬の観測
         """
@@ -74,7 +86,8 @@ class QLearningAgent:
 
         if reward is not None:
             self.reward_history.append(reward)
-            self.learn(reward)
+            if training:
+                self.learn(reward)
 
     def learn(self, reward):
         """
