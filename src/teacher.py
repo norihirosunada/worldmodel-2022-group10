@@ -115,7 +115,7 @@ class ActionModel(nn.Module):
 
         # Linear transform after concatenate task and state
         self.fc3 = nn.Linear(hidden_dim * 2, hidden_dim)
-        self.fc4 = nn.Linear(hidden_dim, action_dim)
+        self.fc4 = nn.Linear(hidden_dim, task_dim)
 
     def forward(self, state, task):
         """Predict action which maximize estimated value with ValueModel
@@ -134,9 +134,8 @@ class ActionModel(nn.Module):
         # concatenate task and state embeddings
         hidden = torch.concatenate((hidden_s, hidden_t), dim=1)
         hidden = self.act(self.fc3(hidden))
-        action_prob = nn.Softmax()(self.fc4(hidden))
 
-        return action_prob
+        return self.fc4(hidden)
 
 
 

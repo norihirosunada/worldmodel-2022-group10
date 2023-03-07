@@ -2,7 +2,6 @@ import numpy as np
 from student import QLearningAgent
 from task_generator import TaskGenerator
 import utils
-from collections import deque
 
 import torch
 from torch.nn import functional as F
@@ -68,6 +67,9 @@ class StudentTrainer(object):
         # Initialize student
         if not is_transfer:
             self.student = self.reset_student(init_state)
+        # update initial states
+        self.student.ini_state = str(init_state)
+        self.student.init_state()
 
         done = False
         task = np.concatenate([start_pos, end_pos], axis=0)
@@ -86,7 +88,7 @@ class StudentTrainer(object):
                 state, reward, is_end_episode = self.env.step(action)[0:3]
                 self.student.observe(state, reward, training=training)
                 episode_reward.append(reward)
-                if num_staps > 1000:
+                if num_staps > self.max_step:
                     break
                 num_staps += 1
             self.student.dict_to_table(self.student.q_values)
@@ -101,9 +103,10 @@ class StudentTrainer(object):
                     done = True
                 break
 
-        student_state = torch.from_numpy(self.student.state_values.astype(np.float32)).view(1, 1, *self.student.state_values.shape)
-        
-        return episode_count, student_state,  done
+        student_state = torch.from_numpy(self.student.state_values.astype(np.float32)).view(1, 1,
+                                                                                            *self.student.state_values.shape)
+
+        return episode_count, student_state, done
 
 
 class TeacherTrainer(object):
@@ -125,45 +128,25 @@ class TeacherTrainer(object):
 
         self.teacher = None
 
-    def train_teacher(self, target_task: np.ndarray, cmdp_episodes: int, n_step: int, max_step):
+    def train_teacher(self, target_task: np.ndarray, cmdp_episodes: int, n_step: int, max_step,
+                      n_source_task: int = 24750):
         """Training teacher's curriculum creation.
         Args:
             target_task: (2, 2) -> [[r_start, c_start], [r_end, c_end]]
             cmdp_episodes: number of curriculum MDP episodes
             n_step: number of steps when calculate lambda target value
             max_step: upper limit for action steps
+            n_source_task: number of source tasks
         Returns:
-
         """
 
         # set device
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        # Create source tasks for given target task.
-        task_gen = TaskGenerator(self.student_env)
-        source_adj = task_gen.create_source_tasks(target_task, mode='adjacent')
-        source_inr = task_gen.create_source_tasks(target_task, mode='inroom')
-        source_tasks = np.concatenate([source_adj, source_inr], axis=0)
-        target_task_arr = target_task
-        target_task = torch.unsqueeze(
-            torch.from_numpy(target_task.reshape(4).astype(np.float32)).to(device), dim=0)
-        
-        # Initialize student trainer for given target task.
-        student_trainer = StudentTrainer(
-            self.student_env,
-            target_task,
-            n_episodes=100,
-            epsilon=0.1,
-            alpha=0.1,
-            gamma=0.9,
-            actions=np.arange(4),
-            max_step=1000
-        )
-        
         # Initializer teacher for given target task
         self.teacher = Teacher(
             state_shape=(1, 1, self.student_env.size, self.student_env.size),
-            task_dim=len(source_tasks)
+            task_dim=n_source_task
         )
 
         # list of dict -> {'state', 'reward', 'action'}
@@ -181,8 +164,29 @@ class TeacherTrainer(object):
 
         value_optimizer = torch.optim.Adam(self.teacher.value_model.parameters(), lr=value_lr, eps=epsilon)
         action_optimizer = torch.optim.Adam(self.teacher.action_model.parameters(), lr=action_lr, eps=epsilon)
-        
+
         for episode in range(cmdp_episodes):
+
+            # Create source tasks for given target task.
+            task_gen = TaskGenerator(self.student_env)
+            source_adj = task_gen.create_source_tasks(target_task, mode='adjacent')
+            source_inr = task_gen.create_source_tasks(target_task, mode='inroom')
+            source_tasks = np.concatenate([source_adj, source_inr], axis=0)
+            target_task_arr = target_task
+            target_task = torch.unsqueeze(
+                torch.from_numpy(target_task.reshape(4).astype(np.float32)).to(device), dim=0)
+
+            # Initialize student trainer for given target task.
+            student_trainer = StudentTrainer(
+                self.student_env,
+                target_task,
+                n_episodes=100,
+                epsilon=0.1,
+                alpha=0.1,
+                gamma=0.9,
+                actions=np.arange(4),
+                max_step=100
+            )
 
             student_state = torch.zeros(1, 1, self.student_env.size, self.student_env.size)
 
@@ -196,14 +200,15 @@ class TeacherTrainer(object):
                 # make for teacher's 1 step
                 state_embedd = self.teacher.encoder(student_state)
                 state_embedd = state_embedd.view(state_embedd.shape[:2])
-                task_prob = self.teacher.action_model(state_embedd, target_task)
-                task = source_tasks[torch.argmax(task_prob)]
+                task_logit = self.teacher.action_model(state_embedd, target_task)
+                task = self.get_task(task_logit, source_tasks)[0]
 
                 # run at source task
                 episode_count, student_state, done = student_trainer.step(task[0], task[1], is_transfer)
 
                 # run at target task
-                # episode_count, _, done = student_trainer.step(target_task_arr[0], target_task_arr[1], is_transfer, False)
+                episode_count, _, done = student_trainer.step(target_task_arr[0], target_task_arr[1], is_transfer,
+                                                              False)
 
                 is_transfer = True
                 experience['action'] = task
@@ -214,10 +219,10 @@ class TeacherTrainer(object):
                 if len(experiences) >= n_step:
                     # flatten target task
                     lambda_target_value = self.td_error(experiences, target_task)
-                    estimated_value = self.teacher.value_model(experiences[0]['state_embedd'].detach(), target_task)
+                    estimated_value = self.teacher.value_model(experiences[0]['state_embedd'], target_task)
 
                     # Update action model
-                    action_loss = estimated_value
+                    action_loss = -1 * estimated_value
                     action_optimizer.zero_grad()
                     action_loss.backward(retain_graph=True)
                     utils.clip_grad_norm_(self.teacher.action_model.parameters(), clip_grad_norm)
@@ -242,7 +247,8 @@ class TeacherTrainer(object):
 
         # Estimate state values from n_step experiences
         target_task = target_task.repeat(len(experiences), 1)
-        state_values = self.teacher.value_model(torch.squeeze(torch.stack([e['state_embedd'] for e in experiences], dim=0), 1), target_task)
+        state_values = self.teacher.value_model(
+            torch.squeeze(torch.stack([e['state_embedd'] for e in experiences], dim=0), 1), target_task)
         state_values = state_values[:, 0]
 
         rewards = torch.unsqueeze(torch.FloatTensor([e['reward'] for e in experiences]), dim=1)
@@ -250,9 +256,31 @@ class TeacherTrainer(object):
 
         return lambda_target_value
 
+    @staticmethod
+    def get_task(task_logit: torch.Tensor, source_tasks: np.ndarray) -> np.ndarray:
+        """Get discrete task representation from continual representation.
+        Args:
+            task_logit: (B, 4)
+            source_tasks: (N, 2, 2)
+        Returns:
+            task: (B, 2, 2)
+        """
+        task_logit = task_logit.detach().numpy()
+        task = np.zeros((task_logit.shape[0], 2, 2))
+        for i in range(task_logit.shape[0]):
+            dist = []
+
+            task_logit_s = task_logit[i, 0:2]
+            task_logit_e = task_logit[i, 2:]
+            for j in range(len(source_tasks)):
+                dist_start = np.sqrt(np.sum((source_tasks[j, 0] - task_logit_s) ** 2))
+                dist_end = np.sqrt(np.sum((source_tasks[j, 1] - task_logit_e) ** 2))
+                dist.append(dist_start + dist_end)
+            task[i] = source_tasks[np.argmin(dist)]
+        return task
+
 
 if __name__ == '__main__':
-
     student_env = GridWorld()
     # target task creation
     task_gen = TaskGenerator(student_env)
