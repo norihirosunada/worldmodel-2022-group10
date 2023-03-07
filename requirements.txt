@@ -5,3 +5,4 @@ jupyter
 matplotlib
 tensorboard
 tqdm
+stable-baselines3-1.7.0

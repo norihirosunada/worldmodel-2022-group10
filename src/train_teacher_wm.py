@@ -14,7 +14,7 @@ from torch.distributions.kl import kl_divergence
 from torch.nn import functional as F
 from torch.utils.tensorboard import SummaryWriter
 
-from environment import make_env
+from env_gym import make_env
 from utils import ReplayBuffer, preprocess_obs, clip_grad_norm_, lambda_target
 from rssm import RSSM
 from dreamer import Encoder, ValueModel, ActionModel, Agent

@@ -124,6 +124,7 @@ def lambda_target(rewards, values, gamma, lambda_):
 
     Returns:
     """
+    values = torch.unsqueeze(values, dim=1)
     V_lambda = torch.zeros_like(rewards, device=rewards.device)
 
     H = rewards.shape[0] - 1
@@ -143,3 +144,33 @@ def lambda_target(rewards, values, gamma, lambda_):
             V_lambda += (1 - lambda_) * (lambda_ ** (n - 1)) * V_n
 
     return V_lambda
+
+
+def lambda_target_(rewards, values, gamma, lambda_):
+    """Calculate λ-return to update value function
+    Args:
+        rewards: (T, )
+        values: (T, )
+        gamma:
+        lambda_:
+
+    Returns:
+
+    """
+    v_vals = []
+    for i in range(rewards.shape[0]):
+        r = 0
+        t = 0
+        g = 0
+        for j in range(i, rewards.shape[0]-1):
+            # Calculate discounted reward.
+            r += (gamma * t) * rewards[j]
+            t += 1
+
+            # Calculate estimated value.
+            g = (lambda_ ** (t-1)) * (r + (gamma ** t) * values[j])
+        g = (1 - lambda_) * g + (r + (gamma ** t)) * rewards[-1]
+
+        v_vals.append(g)
+    return v_vals
+
